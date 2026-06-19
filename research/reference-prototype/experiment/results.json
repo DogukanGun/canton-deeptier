@@ -1,0 +1,257 @@
+{
+  "status": "ok",
+  "problem_id": "deep-tier-credit-penetration",
+  "approach": "anchor-payable-transferable-fungible-token",
+  "baselines": [
+    "reverse-factoring",
+    "po-financing",
+    "plain-factoring",
+    "delegate-financing"
+  ],
+  "metrics": {
+    "standalone-sme": {
+      "mean_financing_spread_over_anchor_bps": 474.13,
+      "mean_spread_reduction_bps": 0.0,
+      "spread_reduction_bps_by_tier": {
+        "tier1": 0.0,
+        "tier2": 0.0,
+        "tier3": 0.0,
+        "tier4": 0.0
+      },
+      "financing_cost_over_anchor_bps_by_tier": {
+        "tier1": 200.04,
+        "tier2": 450.12,
+        "tier3": 748.95,
+        "tier4": 1102.07
+      },
+      "penetration_depth_tier": 0,
+      "coverage_beyond_tier1_pct": 0.0,
+      "deep_tier_cost_gap_to_anchor_bps": 1102.07,
+      "total_financing_cost_savings_usd": 0.0,
+      "origination_fee_revenue_usd": 0.0,
+      "traceability_ratio": 0.0
+    },
+    "reverse-factoring": {
+      "mean_financing_spread_over_anchor_bps": 413.89,
+      "mean_spread_reduction_bps": 60.24,
+      "spread_reduction_bps_by_tier": {
+        "tier1": 149.95,
+        "tier2": 0.0,
+        "tier3": 0.0,
+        "tier4": 0.0
+      },
+      "financing_cost_over_anchor_bps_by_tier": {
+        "tier1": 50.1,
+        "tier2": 450.12,
+        "tier3": 748.95,
+        "tier4": 1102.07
+      },
+      "penetration_depth_tier": 1,
+      "coverage_beyond_tier1_pct": 0.0,
+      "deep_tier_cost_gap_to_anchor_bps": 1102.07,
+      "total_financing_cost_savings_usd": 22972405.37,
+      "origination_fee_revenue_usd": 0.0,
+      "traceability_ratio": 0.0
+    },
+    "po-financing": {
+      "mean_financing_spread_over_anchor_bps": 388.12,
+      "mean_spread_reduction_bps": 86.0,
+      "spread_reduction_bps_by_tier": {
+        "tier1": 80.02,
+        "tier2": 179.98,
+        "tier3": 0.0,
+        "tier4": 0.0
+      },
+      "financing_cost_over_anchor_bps_by_tier": {
+        "tier1": 120.03,
+        "tier2": 270.13,
+        "tier3": 748.95,
+        "tier4": 1102.07
+      },
+      "penetration_depth_tier": 2,
+      "coverage_beyond_tier1_pct": 66.51,
+      "deep_tier_cost_gap_to_anchor_bps": 1102.07,
+      "total_financing_cost_savings_usd": 24600241.07,
+      "origination_fee_revenue_usd": 0.0,
+      "traceability_ratio": 0.0
+    },
+    "plain-factoring": {
+      "mean_financing_spread_over_anchor_bps": 424.11,
+      "mean_spread_reduction_bps": 50.02,
+      "spread_reduction_bps_by_tier": {
+        "tier1": 50.0,
+        "tier2": 50.05,
+        "tier3": 50.0,
+        "tier4": 50.01
+      },
+      "financing_cost_over_anchor_bps_by_tier": {
+        "tier1": 150.04,
+        "tier2": 400.07,
+        "tier3": 698.95,
+        "tier4": 1052.06
+      },
+      "penetration_depth_tier": 0,
+      "coverage_beyond_tier1_pct": 0.0,
+      "deep_tier_cost_gap_to_anchor_bps": 1052.06,
+      "total_financing_cost_savings_usd": 12767273.1,
+      "origination_fee_revenue_usd": 0.0,
+      "traceability_ratio": 0.0
+    },
+    "delegate-financing": {
+      "mean_financing_spread_over_anchor_bps": 179.6,
+      "mean_spread_reduction_bps": 294.53,
+      "spread_reduction_bps_by_tier": {
+        "tier1": 150.05,
+        "tier2": 270.08,
+        "tier3": 438.93,
+        "tier4": 661.98
+      },
+      "financing_cost_over_anchor_bps_by_tier": {
+        "tier1": 49.99,
+        "tier2": 180.04,
+        "tier3": 310.03,
+        "tier4": 440.09
+      },
+      "penetration_depth_tier": 4,
+      "coverage_beyond_tier1_pct": 98.59,
+      "deep_tier_cost_gap_to_anchor_bps": 440.09,
+      "total_financing_cost_savings_usd": 58016321.8,
+      "origination_fee_revenue_usd": 0.0,
+      "traceability_ratio": 0.0
+    },
+    "anchor-payable-token": {
+      "mean_financing_spread_over_anchor_bps": 30.01,
+      "mean_spread_reduction_bps": 444.12,
+      "spread_reduction_bps_by_tier": {
+        "tier1": 170.02,
+        "tier2": 420.1,
+        "tier3": 718.97,
+        "tier4": 1072.05
+      },
+      "financing_cost_over_anchor_bps_by_tier": {
+        "tier1": 30.02,
+        "tier2": 30.02,
+        "tier3": 29.98,
+        "tier4": 30.02
+      },
+      "penetration_depth_tier": 4,
+      "coverage_beyond_tier1_pct": 100.0,
+      "deep_tier_cost_gap_to_anchor_bps": 30.02,
+      "total_financing_cost_savings_usd": 81786055.05,
+      "origination_fee_revenue_usd": 7659026.07,
+      "traceability_ratio": 1.0
+    },
+    "bootstrap_ci": {
+      "candidate_spread_reduction_bps_tier2": {
+        "mean": 420.1,
+        "ci95_low": 419.24,
+        "ci95_high": 420.96,
+        "excludes_zero": true
+      },
+      "candidate_spread_reduction_bps_tier3": {
+        "mean": 718.97,
+        "ci95_low": 717.22,
+        "ci95_high": 720.57,
+        "excludes_zero": true
+      },
+      "candidate_spread_reduction_bps_tier4": {
+        "mean": 1072.05,
+        "ci95_low": 1068.5,
+        "ci95_high": 1075.3,
+        "excludes_zero": true
+      },
+      "candidate_minus_delegate_bps_tier4": {
+        "mean": 410.07,
+        "ci95_low": 409.91,
+        "ci95_high": 410.23,
+        "excludes_zero": true
+      }
+    },
+    "privacy": {
+      "adversarial_probes": 20000,
+      "tier3_fetch_tier1_tier2_leaks": 0,
+      "privacy_leakage": 0,
+      "colluding_party_leakage_bits": 0.0
+    },
+    "settlement": {
+      "p50_settlement_latency_s": 2.026,
+      "p99_settlement_latency_s": 5.535,
+      "replay_attempts": 120000,
+      "double_financing_successes": 0
+    },
+    "sensitivity": {
+      "tier2_mean_standalone_spread_bps": 450.12,
+      "fee_bps_where_tier2_reduction_below_200": 250.12,
+      "anchor_quality_break_even_note": "Candidate beats baselines while anchor spread + fee < deepest-tier standalone spread; advantage vanishes if anchor credit degrades toward SME."
+    },
+    "conservation_ratio": 1.0,
+    "validation": {
+      "tier2_reduction_ge_200bps": true,
+      "tier3_reduction_ge_200bps": true,
+      "deep_tier_within_50bps_of_anchor": true,
+      "tier2_ci_excludes_zero": true,
+      "tier3_ci_excludes_zero": true,
+      "penetration_depth_ge_tier4": true,
+      "coverage_beyond_tier1_ge_80pct": true,
+      "traceability_ratio_eq_1": true,
+      "conservation_ratio_eq_1": true,
+      "privacy_leakage_eq_0": true,
+      "p99_latency_lt_10s": true,
+      "zero_double_financing": true,
+      "all_passed": true
+    },
+    "summary": {
+      "candidate_tier2_reduction_bps": 420.1,
+      "candidate_tier3_reduction_bps": 718.97,
+      "candidate_tier4_reduction_bps": 1072.05,
+      "candidate_deep_tier_gap_to_anchor_bps": 30.02,
+      "candidate_penetration_depth": 4,
+      "candidate_coverage_beyond_tier1_pct": 100.0,
+      "best_baseline_by_tier4_reduction": "delegate-financing",
+      "all_validation_passed": true
+    }
+  },
+  "config": {
+    "anchor_rate_bps": 500,
+    "tiers": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "standalone_spread_mean_bps": {
+      "1": 200,
+      "2": 450,
+      "3": 750,
+      "4": 1100
+    },
+    "standalone_spread_sd_bps": {
+      "1": 40,
+      "2": 80,
+      "3": 130,
+      "4": 190
+    },
+    "origination_fee_bps": 30,
+    "delegate_margin_per_hop_bps": 130,
+    "default_prob_by_tier": {
+      "1": 0.01,
+      "2": 0.025,
+      "3": 0.045,
+      "4": 0.07
+    },
+    "tenor_years": 0.25,
+    "tier_payable_weights": {
+      "1": 0.4,
+      "2": 0.3,
+      "3": 0.2,
+      "4": 0.1
+    },
+    "n_payables": 120000,
+    "n_bootstrap": 300,
+    "n_replay_attempts": 120000,
+    "n_privacy_probes": 20000,
+    "n_conservation_tests": 50000,
+    "seed": 20260616
+  },
+  "errors": []
+}

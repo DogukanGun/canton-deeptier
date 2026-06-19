@@ -1,0 +1,89 @@
+{
+  "problem_id": "deep-tier-credit-penetration",
+  "chosen_direction": "We hypothesize that modeling an anchor's confirmed payable as a Daml Finance TransferableFungible holding, with the anchor as instrument issuer and signatory on every descendant token, lets credit penetrate to tier-2/3 SMEs at near-anchor rates while Canton sub-transaction privacy keeps each bilateral split confidential. The experiment statistically benchmarks this cross-tier direct-financing token design against delegate financing and legacy baselines (reverse factoring, PO financing, plain factoring) using a Monte-Carlo multi-tier simulation calibrated to the Dong-Qiu-Xu MSOM model. The winning configuration on financing-cost reduction, penetration depth, and traceability is refined into a packaged Daml Finance extension with propose-accept endorsement, conservation-enforced splits, origination-fee minting, and atomic maturity settlement.",
+  "experiment_steps": [
+    "1. Stand up a Daml SDK 2.9 plus Daml Finance 4.0 project on a local Canton network with one participant node per tier party (Anchor, Tier1, Tier2, Tier3, Financier, Platform) and pin all dependencies in daml.yaml.",
+    "2. Implement the candidate AnchorPayable as a TransferableFungible holding with the anchor as issuer-signatory, plus consuming Split/Merge choices enforcing sum(children)+originationFee == parent and a propose-accept transfer workflow.",
+    "3. Implement baseline cost models for reverse factoring, PO financing, and plain factoring, including time-value-of-capital/NPV, and a delegate-financing variant, so each financed transaction can be scored against its no-tokenization counterfactual.",
+    "4. Build a calibrated multi-tier agent-based simulation harness parameterized from the Dong-Qiu-Xu MSOM model and ADB credit-gap figures: supplier graph depth, order sizes, default probabilities, and per-tier idiosyncratic rates.",
+    "5. Generate synthetic workloads of 100k+ tokenized payables across 4+ tiers with configurable working-capital constraints and replay/double-financing attempts, and run 100+ Monte-Carlo trials per configuration recording outputs to results.json.",
+    "6. Measure per-tier spread reduction (bps vs standalone SME rate), penetration depth, traceability ratio, settlement latency, and origination-fee revenue for candidate vs each baseline, comparing via paired bootstrap with 95% confidence intervals.",
+    "7. Run privacy and adversarial tests asserting a tier-3 participant cannot fetch tier-1 to tier-2 sub-transaction projections, and quantify colluding-party leakage about volumes, counterparties, and margins.",
+    "8. Run sensitivity analyses on default rates, anchor credit quality, and fee levels to find thresholds where deep-tier financing stops beating baselines, then select the winning configuration and record rationale in winner.md."
+  ],
+  "prototype_steps": [
+    "1. Refactor the winning templates into a clean Daml Finance extension package under src with interface instances for Holding, Transferable, Fungible, and Lifecycle so it composes with standard registry and settlement infrastructure.",
+    "2. Define a high-level operator API: mintFromErpEvent(approval), splitAndEndorse(holdingCid, amount, recipient), discountToFinancier(holdingCid, rate), and settleAtMaturity(batchId), each backed by typed request records.",
+    "3. Implement the propose-accept endorsement, conservation-enforced split with origination-fee holding minted to the platform, and explicit-disclosure flow letting financiers validate holdings without permanent observer rights.",
+    "4. Wire in the anchor ERP ingest adapter (ISO 20022/Peppol), eKYC/GLEIF LEI gating on transfer choices, the credit/rate oracle integration, and an MLETR/ETDA-aligned electronic-transferable-record wrapper for exclusive control and singularity.",
+    "5. Implement maturity settlement using Lifecycle Effects and Settlement Batch atomic allocate-approve-settle with multilateral netting and a tokenized-deposit or pacs/pain cash leg that atomically archives outstanding tokens.",
+    "6. Add Daml Script invariant and integration tests with >=90% choice coverage: total outstanding holdings plus fees equal original faceValue, no split below zero, anchor removable only at settlement, and tier-3 privacy assertions.",
+    "7. Build the metrics emitter and evaluation dashboard exporting per-tier KPIs and origination-fee accounting, plus a JSON-RPC/JSON API gateway for operators and funders to query provenance and financing offers.",
+    "8. Produce README usage examples, an architecture diagram, an MLETR/legal-mapping compliance note, governance guidance from the Marco Polo insolvency lessons, and a migration guide from single-tier reverse factoring."
+  ],
+  "architecture": [
+    {
+      "name": "Anchor ERP Ingest",
+      "description": "Receives approved-invoice and goods-receipt events from the anchor buyer's ERP over ISO 20022 and Peppol APIs, validates schema and signatures, performs eKYC and GLEIF LEI checks on parties, and mints the root AnchorPayable instrument carrying faceValue, currency, maturity, and anchorObligationId.",
+      "color_group": "input"
+    },
+    {
+      "name": "Token Mint and Instrument Registry",
+      "description": "Defines Daml Finance Instrument, Account, Custodian, and Registry roles with the anchor as issuer-signatory, materializes the root divisible TransferableFungible holding, and registers party accounts so every descendant token retains the anchor as a verifiable stakeholder back to origination.",
+      "color_group": "logic"
+    },
+    {
+      "name": "Split, Endorse and Transfer Engine",
+      "description": "Implements consuming Split and Merge choices asserting conservation of value (sum of children plus origination fee equals parent), a propose-accept TransferProposal workflow for down-tier endorsement requiring recipient authorization, and a lineage field recording parentCid and tierDepth for auditable provenance.",
+      "color_group": "logic"
+    },
+    {
+      "name": "Privacy and Disclosure Layer",
+      "description": "Leverages Canton blinded Merkle-tree sub-transaction privacy with one participant node per tier party and explicit disclosed contracts so financiers can validate and discount a holding without becoming permanent observers, keeping counterparties, amounts, and margins confidential between adjacent tiers only.",
+      "color_group": "external"
+    },
+    {
+      "name": "Credit and Rate Oracle",
+      "description": "Integrates anchor credit rating, per-tier idiosyncratic SME rates, and reference benchmark curves from an off-chain oracle, pricing early-factoring discounts off the anchor's near-risk-free rate and feeding the baseline comparator and discount-proposal logic with current market spreads.",
+      "color_group": "external"
+    },
+    {
+      "name": "Settlement and Lifecycle Engine",
+      "description": "Uses Daml Finance Lifecycle and Effect machinery to emit a payment effect at maturityDate, then executes a Settlement Batch with atomic allocate-approve-settle and multilateral netting, archiving outstanding holdings against the anchor's tokenized-deposit or pacs/pain bank-rail cash leg.",
+      "color_group": "storage"
+    },
+    {
+      "name": "Provenance and Nullifier Store",
+      "description": "Persists an append-only lineage ledger and nullifier registry indexed by anchorObligationId and tier, preventing double-financing and over-splitting, and exposing query endpoints for reconciliation, audit, and difference-in-differences pilot reconstruction of the credit chain.",
+      "color_group": "storage"
+    },
+    {
+      "name": "Metrics and Evaluation Harness",
+      "description": "Computes per-tier interest-spread reduction in basis points, penetration depth, traceability ratio, SME volume unlocked, settlement latency, and origination-fee revenue from on-ledger events plus the rate oracle, exporting distributions with bootstrapped confidence intervals to dashboards.",
+      "color_group": "metrics"
+    },
+    {
+      "name": "Reporting and Origination-Fee Output",
+      "description": "Generates head-to-head comparison reports against each baseline, financing-cost-reduction-per-tier summaries, compliance and MLETR-evidence exports, and platform take-rate statements, delivering results to operators, funders, and the anchor as the monetizable origination-fee accounting surface.",
+      "color_group": "output"
+    }
+  ],
+  "tech_stack": [
+    "Daml SDK 2.9.5",
+    "Daml Finance 4.0.0",
+    "Canton 2.9 Community",
+    "Python 3.11",
+    "SimPy 4.1",
+    "NumPy 1.26",
+    "pytest 8.1",
+    "PostgreSQL 15",
+    "Grafana 10.4"
+  ],
+  "validation_criteria": [
+    "Per-tier interest-spread reduction >= 200 bps versus each SME's standalone rate at tier-2 and tier-3, with deep-tier cost converging to within 50 bps of the anchor rate (95% bootstrap CI excludes zero).",
+    "Credit-penetration depth reaches at least tier 4 with sub-anchor financing cost, exceeding the typical 3-4 tier commercial ceiling, covering >= 80% of chain spend beyond tier-1.",
+    "Traceability ratio = 1.0 (100% of financed tokens have unbroken cryptographic provenance to the anchor obligation) and conservation invariant holds in 100% of split/merge tests.",
+    "Privacy leakage = 0: no tier-3 participant can fetch any tier-1 to tier-2 sub-transaction projection across all adversarial tests.",
+    "p99 split-to-cash settlement latency < 10 seconds on a single Canton synchronizer with zero double-financing across 100k+ replay attempts."
+  ]
+}

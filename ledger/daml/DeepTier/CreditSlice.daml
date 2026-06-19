@@ -1,0 +1,193 @@
+-- | Deep-tier supply-chain finance with load-bearing privacy.
+--
+-- A single `CreditSlice` template is BOTH the anchor's root payable (tier 1) and
+-- every descendant slice. The privacy model is structural, not policy:
+--
+--   * CREDIT factor  — `anchor` is a signatory of EVERY slice, and `lineage`
+--     records provenance back to the minted payable. Any holder/financier can
+--     therefore verify a deep-tier slice is genuinely anchor-backed.
+--   * COMMERCIAL factor — `faceAmount` / counterparty / margin live only on the
+--     bilateral slice. A slice's stakeholders are {anchor, owner, platform}, so
+--     Canton's per-party projection means a sibling tier or a financier NEVER
+--     receives the upstream slice at all (it is absent from their queries).
+--
+-- Conservation (child + remainder == parent; fee + financed == source), enforced
+-- inside the atomic choices, plus single-spend (the parent/source is archived
+-- when split/discounted), make a slice impossible to over-issue or double-pledge
+-- — even though no single party ever sees the whole tree.
+--
+-- Authorization vs visibility: the OWNER consumes its own slice (it can see it)
+-- and emits a proposal carrying only the next slice's data. The recipient then
+-- mints the child from the proposal. The recipient never fetches the parent,
+-- which it is not allowed to see — that is exactly the privacy guarantee.
+--
+-- `platform` co-signs every slice (the operator that runs the network and the
+-- fee beneficiary). Competitor confidentiality is between tiers/financiers, not
+-- against the operator; production deploys each org on its own Canton participant
+-- node for cryptographic sub-transaction privacy (README "future work").
+module DeepTier.CreditSlice where
+
+template CreditSlice
+  with
+    anchor       : Party    -- credit factor: signs every descendant slice
+    owner        : Party    -- current holder (Tier1 / Tier2 / Financier / Platform for fees)
+    platform     : Party    -- operator; co-signs every slice; fee beneficiary
+    instrumentId : Text     -- groups all slices of one anchor obligation
+    faceAmount   : Decimal  -- commercial factor: bilateral, stakeholder-scoped
+    tier         : Int      -- 1 = root payable, increments on each split
+    maturity     : Date
+    lineage      : [Text]   -- provenance: lineage[0] roots at the minted payable
+    isFee        : Bool
+  where
+    signatory anchor, owner, platform
+    ensure faceAmount > 0.0
+
+    -- | Owner endorses `splitAmt` down to `recipient` (next tier) and keeps the
+    -- remainder. Consuming: archives this slice (single-spend) and emits a
+    -- proposal the recipient accepts to mint the child.
+    choice ProposeSplit : (ContractId SplitProposal, Optional (ContractId CreditSlice))
+      with
+        splitAmt  : Decimal
+        recipient : Party
+      controller owner
+      do
+        assertMsg "split must be > 0" (splitAmt > 0.0)
+        assertMsg "split must be <= faceAmount" (splitAmt <= faceAmount)
+        let remFace = faceAmount - splitAmt
+        assertMsg "conservation broken" (splitAmt + remFace == faceAmount)
+        remainder <-
+          if remFace > 0.0
+            then Some <$> create this with faceAmount = remFace
+            else return None
+        prop <- create SplitProposal with
+          anchor; owner; platform; instrumentId
+          childFace     = splitAmt
+          childTier     = tier + 1
+          maturity      = maturity
+          parentLineage = lineage
+          recipient     = recipient
+        return (prop, remainder)
+
+    -- | Owner offers to discount this slice to a financier. Consuming: archives
+    -- this slice (single-spend) and emits a proposal the financier accepts.
+    choice ProposeDiscount : ContractId DiscountProposal
+      with
+        financier : Party
+        feeRate   : Decimal
+      controller owner
+      do
+        assertMsg "feeRate must be in [0,1)" (feeRate >= 0.0 && feeRate < 1.0)
+        create DiscountProposal with
+          anchor; owner; platform; instrumentId
+          sourceFace    = faceAmount
+          sourceTier    = tier
+          maturity      = maturity
+          sourceLineage = lineage
+          financier     = financier
+          feeRate       = feeRate
+
+    -- | Maturity settlement: the anchor archives the slice (off-ledger cash leg
+    -- pays `owner` faceAmount). Atomic batch = one submission exercising Settle on
+    -- every live slice; tree-wide conservation is re-checked in the settle script.
+    choice Settle : ()
+      controller anchor
+      do return ()
+
+-- | Conservation-enforced, bilateral split. Visible only to {anchor, owner,
+-- platform, recipient}. Carries the child's data so the recipient can mint the
+-- child WITHOUT reading the (invisible) parent.
+template SplitProposal
+  with
+    anchor        : Party
+    owner         : Party
+    platform      : Party
+    instrumentId  : Text
+    childFace     : Decimal
+    childTier     : Int
+    maturity      : Date
+    parentLineage : [Text]
+    recipient     : Party
+  where
+    signatory anchor, owner, platform
+    observer recipient
+
+    choice AcceptSplit : ContractId CreditSlice
+      controller recipient
+      do
+        create CreditSlice with
+          anchor; platform; instrumentId
+          owner      = recipient
+          faceAmount = childFace
+          tier       = childTier
+          maturity   = maturity
+          lineage    = parentLineage <> [show recipient]
+          isFee      = False
+
+    choice RejectSplit : ContractId CreditSlice
+      controller recipient
+      do
+        -- refund the child amount back to the original owner
+        create CreditSlice with
+          anchor; owner; platform; instrumentId
+          faceAmount = childFace
+          tier       = childTier - 1
+          maturity   = maturity
+          lineage    = parentLineage
+          isFee      = False
+
+-- | Financing: mint an origination-fee slice to the platform and the discounted
+-- slice for the financier. The financier's slice carries the anchor signatory +
+-- full lineage (so it can verify anchor-backing) but reveals nothing about the
+-- upstream Anchor<->Tier1 amounts. Carries the source's data — no parent read.
+template DiscountProposal
+  with
+    anchor        : Party
+    owner         : Party
+    platform      : Party
+    instrumentId  : Text
+    sourceFace    : Decimal
+    sourceTier    : Int
+    maturity      : Date
+    sourceLineage : [Text]
+    financier     : Party
+    feeRate       : Decimal
+  where
+    signatory anchor, owner, platform
+    observer financier
+
+    choice AcceptDiscount : (ContractId CreditSlice, ContractId CreditSlice)
+      controller financier
+      do
+        let fee    = sourceFace * feeRate
+            finAmt = sourceFace - fee
+        assertMsg "fee must be > 0" (fee > 0.0)
+        assertMsg "discount conservation broken" (fee + finAmt == sourceFace)
+        feeCid <- create CreditSlice with
+          anchor; platform; instrumentId
+          owner      = platform
+          faceAmount = fee
+          tier       = sourceTier
+          maturity   = maturity
+          lineage    = sourceLineage <> ["fee"]
+          isFee      = True
+        finCid <- create CreditSlice with
+          anchor; platform; instrumentId
+          owner      = financier
+          faceAmount = finAmt
+          tier       = sourceTier
+          maturity   = maturity
+          lineage    = sourceLineage <> [show financier]
+          isFee      = False
+        return (finCid, feeCid)
+
+    choice RejectDiscount : ContractId CreditSlice
+      controller financier
+      do
+        -- refund the full source amount back to the original owner
+        create CreditSlice with
+          anchor; owner; platform; instrumentId
+          faceAmount = sourceFace
+          tier       = sourceTier
+          maturity   = maturity
+          lineage    = sourceLineage
+          isFee      = False

@@ -1,0 +1,85 @@
+-- | Executable spec mirroring deeptier/core.py invariants. Run with `daml test`.
+module Setup.Tests where
+
+import Daml.Script
+import DA.Date (date, Month(..))
+import DA.Assert ((===))
+import DA.Foldable (forA_)
+import DeepTier.CreditSlice
+import Setup.Init (allocateParties, mintRoot)
+
+iid : Text
+iid = "PAYABLE-TEST"
+
+mat : Date
+mat = date 2026 Dec 31
+
+faceOf : Optional CreditSlice -> Decimal
+faceOf = optional 0.0 (\s -> s.faceAmount)
+
+-- Conservation: after a split, child + remainder == parent.
+test_conservation_on_split : Script ()
+test_conservation_on_split = do
+  p <- allocateParties
+  root <- mintRoot p mat iid 1000000.0
+  (prop, Some rem) <- submit p.tier1 $ exerciseCmd root ProposeSplit with splitAmt = 400000.0, recipient = p.tier2
+  child <- submit p.tier2 $ exerciseCmd prop AcceptSplit
+  c <- queryContractId p.tier2 child
+  r <- queryContractId p.tier1 rem
+  (faceOf c + faceOf r) === 1000000.0
+  faceOf c === 400000.0
+  faceOf r === 600000.0
+
+-- Single-spend: the parent is consumed at ProposeSplit, so a second split on the
+-- same parent contract must fail.
+test_single_spend : Script ()
+test_single_spend = do
+  p <- allocateParties
+  root <- mintRoot p mat iid 1000000.0
+  _ <- submit p.tier1 $ exerciseCmd root ProposeSplit with splitAmt = 400000.0, recipient = p.tier2
+  submitMustFail p.tier1 $ exerciseCmd root ProposeSplit with splitAmt = 300000.0, recipient = p.tier2
+
+-- Over-split is rejected by the ProposeSplit precondition.
+test_oversplit_rejected : Script ()
+test_oversplit_rejected = do
+  p <- allocateParties
+  root <- mintRoot p mat iid 1000000.0
+  submitMustFail p.tier1 $ exerciseCmd root ProposeSplit with
+    splitAmt  = 1500000.0
+    recipient = p.tier2
+
+-- Discount conserves value: fee + financier slice == source; fee goes to platform.
+test_discount_conservation : Script ()
+test_discount_conservation = do
+  p <- allocateParties
+  root <- mintRoot p mat iid 1000000.0
+  (prop, _) <- submit p.tier1 $ exerciseCmd root ProposeSplit with splitAmt = 400000.0, recipient = p.tier2
+  child <- submit p.tier2 $ exerciseCmd prop AcceptSplit
+  dprop <- submit p.tier2 $ exerciseCmd child ProposeDiscount with
+    financier = p.financier
+    feeRate   = 0.0025
+  (finCid, feeCid) <- submit p.financier $ exerciseCmd dprop AcceptDiscount
+  fin <- queryContractId p.financier finCid
+  fee <- queryContractId p.platform feeCid
+  (faceOf fin + faceOf fee) === 400000.0
+  faceOf fin === 399000.0
+  faceOf fee === 1000.0
+
+-- Settlement: every outstanding slice can be settled by the anchor, and the
+-- outstanding faces sum back to the original face (conservation across the tree).
+test_settlement_conservation : Script ()
+test_settlement_conservation = do
+  p <- allocateParties
+  root <- mintRoot p mat iid 1000000.0
+  (prop, Some rem) <- submit p.tier1 $ exerciseCmd root ProposeSplit with splitAmt = 400000.0, recipient = p.tier2
+  child <- submit p.tier2 $ exerciseCmd prop AcceptSplit
+  dprop <- submit p.tier2 $ exerciseCmd child ProposeDiscount with
+    financier = p.financier
+    feeRate   = 0.0025
+  (finCid, feeCid) <- submit p.financier $ exerciseCmd dprop AcceptDiscount
+  -- Outstanding: Tier1 remainder (600k) + Financier (399k) + Platform fee (1k) = 1,000,000
+  rSlice <- queryContractId p.tier1 rem
+  fSlice <- queryContractId p.financier finCid
+  feeSlice <- queryContractId p.platform feeCid
+  (faceOf rSlice + faceOf fSlice + faceOf feeSlice) === 1000000.0
+  forA_ [rem, finCid, feeCid] $ \cid -> submit p.anchor $ exerciseCmd cid Settle

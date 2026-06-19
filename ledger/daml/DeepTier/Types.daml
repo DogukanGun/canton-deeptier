@@ -1,0 +1,14 @@
+-- | Shared helpers for the deep-tier credit model.
+--
+-- The conservation invariant is asserted with EXACT decimal equality. Demo
+-- numbers are chosen so all arithmetic is exact (1,000,000 / 600,000 / 400,000;
+-- fee = 400,000 * 0.0025 = 1,000.0), so no rounding helper is needed.
+module DeepTier.Types where
+
+-- | Origination fee charged when a slice is discounted to a financier.
+feeOf : Decimal -> Decimal -> Decimal
+feeOf rate amount = amount * rate
+
+-- | Default demo origination-fee rate (25 bps).
+defaultFeeRate : Decimal
+defaultFeeRate = 0.0025

@@ -1,0 +1,102 @@
+-- | Deep-tier credit-penetration extension for Daml Finance 4.0.0.
+--
+-- Reference on-ledger design (illustrative; the runnable benchmark lives in
+-- the `deeptier` Python package). A confirmed payable is a TransferableFungible
+-- holding whose Instrument issuer = the anchor, and the anchor is a signatory
+-- of EVERY descendant token. Splits conserve face value, financing mints an
+-- origination-fee holding to the platform, and maturity settlement atomically
+-- archives all outstanding tokens.
+--
+-- NOTE: this file documents template shape and authorization; it is not wired
+-- into a DAR build here (no daml.yaml in this minimal prototype).
+
+module DeepTier where
+
+import DA.Set qualified as Set
+import Daml.Finance.Interface.Types.Common.Types (InstrumentKey, AccountKey)
+
+-- | A confirmed-payable holding. `anchor` co-signs every descendant so the
+-- anchor's credit penetrates downstream. `lineage` carries provenance for
+-- traceability; `disclosedTo` is the explicit-disclosure set (no permanent
+-- observer rights -> Canton sub-transaction privacy for each bilateral split).
+template ConfirmedPayableHolding
+  with
+    anchor      : Party          -- instrument issuer + universal signatory
+    owner       : Party          -- current tier holder
+    platform    : Party          -- fee beneficiary / operator
+    instrument  : InstrumentKey  -- anchor confirmed-payable instrument
+    amount      : Decimal
+    tier        : Int
+    maturity    : Date
+    lineage     : [Text]         -- root -> ... -> this
+    disclosedTo : Set.Set Party
+    isFee       : Bool
+  where
+    signatory anchor, owner       -- anchor signs EVERY descendant token
+    observer disclosedTo
+    ensure amount > 0.0           -- no zero/negative holdings
+
+    -- | Propose-accept, conservation-enforced split that endorses `splitAmt`
+    -- down to the next tier. Children sum to the parent (face conserved).
+    choice SplitAndEndorse : (ContractId ConfirmedPayableHolding, Optional (ContractId ConfirmedPayableHolding))
+      with
+        splitAmt  : Decimal
+        recipient : Party
+      controller owner, recipient   -- propose (owner) + accept (recipient)
+      do
+        assertMsg "split must be > 0" (splitAmt > 0.0)
+        assertMsg "no split below zero" (splitAmt <= amount)
+        child <- create this with
+          owner = recipient
+          tier = tier + 1
+          lineage = lineage <> ["child"]
+          disclosedTo = Set.fromList [anchor, recipient]
+        remainder <-
+          if splitAmt < amount
+            then Some <$> create this with
+                   amount = amount - splitAmt
+                   disclosedTo = Set.fromList [anchor, owner]
+            else pure None
+        pure (child, remainder)
+
+    -- | Discount to a financier; mints an origination-fee holding to the
+    -- platform and archives this token (singularity / exclusive control ->
+    -- the same receivable cannot be financed twice).
+    choice DiscountToFinancier : ContractId ConfirmedPayableHolding
+      with
+        financier : Party
+        feeRate   : Decimal
+      controller owner, financier
+      do
+        let fee = amount * feeRate
+        _ <- create this with
+          owner = platform, amount = fee, isFee = True
+          disclosedTo = Set.fromList [anchor, platform]
+        create this with
+          owner = financier, amount = amount - fee
+          disclosedTo = Set.fromList [anchor, financier]
+
+-- | Atomic maturity settlement: the anchor funds face value, every outstanding
+-- holding is archived (anchor signatory released ONLY here), and conservation
+-- is checked across the Settlement Batch via Lifecycle Effects.
+template MaturityBatch
+  with
+    anchor     : Party
+    platform   : Party
+    instrument : InstrumentKey
+    faceValue  : Decimal
+    holdings   : [ContractId ConfirmedPayableHolding]
+  where
+    signatory anchor
+    observer platform
+
+    choice SettleAtMaturity : ()
+      controller anchor
+      do
+        archived <- forA holdings $ \cid -> do
+          h <- fetch cid
+          archive cid                 -- pacs/pain cash leg pays h.owner h.amount
+          pure h.amount
+        assertMsg "settlement conservation failed"
+          (sum archived == faceValue) -- outstanding + fees == original face
+        pure ()

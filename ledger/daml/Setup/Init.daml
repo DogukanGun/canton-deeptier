@@ -1,0 +1,57 @@
+-- | Init script wired as `init-script` in daml.yaml: allocates the five demo
+-- parties and seeds a payable + one split, so the app boots into a live state:
+--   * Anchor<->Tier1 slice: 600,000 (visible only to Anchor/Tier1/Platform)
+--   * Anchor<->Tier2 slice: 400,000 (the slice the Financier will fund)
+module Setup.Init where
+
+import Daml.Script
+import DA.Date (date, Month(..))
+import DeepTier.CreditSlice
+
+data Parties = Parties with
+  anchor    : Party
+  tier1     : Party
+  tier2     : Party
+  financier : Party
+  platform  : Party
+    deriving (Eq, Show)
+
+allocateParties : Script Parties
+allocateParties = do
+  anchor    <- allocatePartyWithHint "Anchor"    (PartyIdHint "Anchor")
+  tier1     <- allocatePartyWithHint "Tier1"     (PartyIdHint "Tier1")
+  tier2     <- allocatePartyWithHint "Tier2"     (PartyIdHint "Tier2")
+  financier <- allocatePartyWithHint "Financier" (PartyIdHint "Financier")
+  platform  <- allocatePartyWithHint "Platform"  (PartyIdHint "Platform")
+  pure Parties with ..
+
+-- | Mint the root payable to Tier1 (anchor + tier1 + platform all sign).
+mintRoot : Parties -> Date -> Text -> Decimal -> Script (ContractId CreditSlice)
+mintRoot p mat iid amt =
+  submitMulti [p.anchor, p.tier1, p.platform] [] $
+    createCmd CreditSlice with
+      anchor       = p.anchor
+      owner        = p.tier1
+      platform     = p.platform
+      instrumentId = iid
+      faceAmount   = amt
+      tier         = 1
+      maturity     = mat
+      lineage      = [iid]
+      isFee        = False
+
+setup : Script ()
+setup = do
+  p <- allocateParties
+  let mat = date 2026 Dec 31
+      iid = "PAYABLE-2026-001"
+
+  root <- mintRoot p mat iid 1000000.0
+
+  -- Tier1 endorses 400,000 down to Tier2; keeps 600,000.
+  (prop, _remainder) <- submit p.tier1 $ exerciseCmd root ProposeSplit with
+    splitAmt  = 400000.0
+    recipient = p.tier2
+  _ <- submit p.tier2 $ exerciseCmd prop AcceptSplit
+
+  pure ()
