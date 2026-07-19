@@ -5,6 +5,8 @@ import { partyId, Role } from "@/lib/parties";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Slow-but-successful Devnet writes need room beyond Vercel's default cap.
+export const maxDuration = 60;
 
 export async function POST(req: Request) {
   try {

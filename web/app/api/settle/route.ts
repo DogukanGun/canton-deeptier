@@ -4,6 +4,8 @@ import { exerciseAs, TPL, LedgerError } from "@/lib/ledger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Slow-but-successful Devnet writes need room beyond Vercel's default cap.
+export const maxDuration = 60;
 
 // Anchor settles a slice at maturity (off-ledger cash leg pays the owner).
 export async function POST(req: Request) {

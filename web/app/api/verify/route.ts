@@ -4,6 +4,8 @@ import { querySlices, LedgerError } from "@/lib/ledger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Reads chain ledger-end + active-contracts; give room under Devnet load.
+export const maxDuration = 60;
 
 // The financier's verification: from the slice it holds, confirm anchor-backing
 // and non-double-pledge — WITHOUT ever seeing the upstream amounts/margins.

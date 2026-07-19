@@ -48,10 +48,16 @@ export class LedgerError extends Error {
   }
 }
 
+// Writes (submit-and-wait-for-transaction) on the shared Devnet validator can
+// take well over 8s under load; a too-tight timeout aborts a request whose
+// transaction actually commits server-side, surfacing a false "unreachable"
+// error. 30s keeps slow-but-successful writes from showing as failures.
+const REQUEST_TIMEOUT_MS = 30000;
+
 async function call(path: string, method: "GET" | "POST", body?: unknown): Promise<any> {
   const token = await getAccessToken();
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 8000);
+  const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}`, {

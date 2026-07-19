@@ -146,6 +146,17 @@ export default function Dashboard() {
       await load();
     });
 
+  const resetDemo = () =>
+    act(async () => {
+      if (!confirm("Reset the demo to the starting state? This settles every current slice and re-seeds a fresh $1,000,000 payable split down to Tier-2.")) return;
+      flash("ok", "Resetting the demo… this takes a few seconds.");
+      await api("/api/reset", { method: "POST" });
+      await api("/api/perspective", { method: "POST", body: JSON.stringify({ role: "Anchor" }) });
+      setVerification(null);
+      await load();
+      flash("ok", "Demo reset to the starting state.");
+    });
+
   return (
     <div className="mx-auto max-w-6xl px-5 py-8">
       {/* Header */}
@@ -163,12 +174,22 @@ export default function Dashboard() {
             slice — the ledger never reveals upstream amounts or margins.
           </p>
         </div>
-        <a
-          href="/mint"
-          className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-medium text-slate-200 hover:border-slate-500"
-        >
-          + Mint payable
-        </a>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={resetDemo}
+            disabled={busy}
+            title="Settle all slices and re-seed the starting state"
+            className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-medium text-slate-400 hover:border-slate-500 hover:text-slate-200 disabled:opacity-50"
+          >
+            {busy ? "Working…" : "↻ Reset demo"}
+          </button>
+          <a
+            href="/mint"
+            className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-medium text-slate-200 hover:border-slate-500"
+          >
+            + Mint payable
+          </a>
+        </div>
       </header>
 
       {/* Perspective toggle */}
