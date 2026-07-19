@@ -1,24 +1,45 @@
-// Dev (alg:none) JWT minting for the Daml JSON API started with
-// --allow-insecure-tokens. SERVER-ONLY: this module is imported only by route
-// handlers; the secret-free token never reaches the browser. In production this
-// is where real IdP-issued tokens (per the authenticated user's party) slot in.
+// Real OIDC client-credentials auth for the 5N Sandbox Devnet validator's
+// JSON Ledger API v2. Replaces the old alg:none dev-token minting, which only
+// worked against a local sandbox started with --allow-insecure-tokens.
+// SERVER-ONLY: the client secret never reaches the browser.
 import "server-only";
 
-function b64url(obj: unknown): string {
-  return Buffer.from(JSON.stringify(obj)).toString("base64url");
+const TOKEN_URL = process.env.LEDGER_OIDC_TOKEN_URL ?? "https://auth.sandbox.fivenorth.io/application/o/token/";
+const CLIENT_ID = process.env.LEDGER_OIDC_CLIENT_ID ?? "";
+const CLIENT_SECRET = process.env.LEDGER_OIDC_CLIENT_SECRET ?? "";
+const AUDIENCE = process.env.LEDGER_OIDC_AUDIENCE ?? CLIENT_ID;
+const SCOPE = process.env.LEDGER_OIDC_SCOPE ?? "daml_ledger_api";
+
+// 60s safety margin so an in-flight request never races a token refresh.
+const REFRESH_BUFFER_MS = 60_000;
+
+let cached: { token: string; expiresAt: number } | null = null;
+
+async function fetchToken(): Promise<{ token: string; expiresAt: number }> {
+  const res = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      audience: AUDIENCE,
+      scope: SCOPE,
+    }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`OIDC token request failed: HTTP ${res.status}`);
+  }
+  const json = await res.json();
+  const expiresInMs = (Number(json.expires_in) || 3600) * 1000;
+  return { token: json.access_token as string, expiresAt: Date.now() + expiresInMs };
 }
 
-// One token may act/read as several parties (e.g. minting the root needs
-// anchor + owner + platform authority in a single submission).
-export function devToken(parties: string[]): string {
-  const header = { alg: "none", typ: "JWT" };
-  const payload = {
-    "https://daml.com/ledger-api": {
-      ledgerId: process.env.LEDGER_LEDGER_ID ?? "sandbox",
-      applicationId: process.env.LEDGER_APP_ID ?? "deeptier",
-      actAs: parties,
-      readAs: parties,
-    },
-  };
-  return `${b64url(header)}.${b64url(payload)}.`;
+export async function getAccessToken(): Promise<string> {
+  if (cached && cached.expiresAt - REFRESH_BUFFER_MS > Date.now()) {
+    return cached.token;
+  }
+  cached = await fetchToken();
+  return cached.token;
 }

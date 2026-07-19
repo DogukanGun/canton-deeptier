@@ -1,19 +1,43 @@
-// The single choke point for the Daml v1 JSON API. All endpoint/response-shape
-// coupling lives here. Stateless: every call mints a per-party dev JWT and the
-// ledger filters results by that party's projection — which is exactly the
-// privacy guarantee (withheld contracts never arrive).
+// The single choke point for the Canton JSON Ledger API v2 on the 5N Sandbox
+// Devnet validator. All endpoint/response-shape coupling lives here.
+//
+// Auth is a single shared OIDC credential (lib/jwt.ts), not a per-party dev
+// token — v2 commands carry actAs/readAs explicitly in the request body
+// instead. The ledger's per-party projection on queries is still what
+// enforces privacy: a query filtered to a party's actAs/readAs only ever
+// returns contracts that party is a stakeholder of.
+//
+// NOTE: response parsing below (queryActiveContracts) is written against the
+// documented v2 JSON shape but has not yet been exercised against a live,
+// successfully-authorized call (blocked on a validator-side rights/quota
+// issue as of 2026-07-12 — see project memory). Re-verify the createdEvent
+// envelope shape the first time a query actually succeeds.
 import "server-only";
-import { devToken } from "./jwt";
+import { getAccessToken } from "./jwt";
 import { partyId, Role, roleOf, ROLE_LABELS } from "./parties";
 
-const BASE = process.env.LEDGER_API_URL ?? "http://localhost:7575";
+const BASE = process.env.LEDGER_API_URL ?? "https://ledger-api.validator.devnet.sandbox.fivenorth.io";
 const PKG = process.env.LEDGER_PACKAGE_ID ?? "";
+const PKG_NAME = process.env.LEDGER_PACKAGE_NAME ?? "deeptier";
 const MOD = "DeepTier.CreditSlice";
+// The Daml ledger user the OIDC token authenticates as on the 5N Sandbox
+// (token sub=6, primaryParty 5nsandbox-devnet-2::...). This user must hold
+// CanActAs rights on our parties (granted via POST /v2/users/6/rights).
+const USER_ID = process.env.LEDGER_USER_ID ?? "6";
 
 export const TPL = {
   CreditSlice: `${PKG}:${MOD}:CreditSlice`,
   SplitProposal: `${PKG}:${MOD}:SplitProposal`,
   DiscountProposal: `${PKG}:${MOD}:DiscountProposal`,
+};
+
+// Query filters (active-contracts TemplateFilter) reject package-id templateIds
+// with "expected a package name" - they want the #package-name form instead.
+// Command submission (create/exercise) keeps using the pinned package-id form.
+const TPL_FILTER = {
+  CreditSlice: `#${PKG_NAME}:${MOD}:CreditSlice`,
+  SplitProposal: `#${PKG_NAME}:${MOD}:SplitProposal`,
+  DiscountProposal: `#${PKG_NAME}:${MOD}:DiscountProposal`,
 };
 
 export class LedgerError extends Error {
@@ -24,16 +48,16 @@ export class LedgerError extends Error {
   }
 }
 
-async function callAs(path: string, parties: string[], body: unknown): Promise<any> {
-  const token = devToken(parties);
+async function call(path: string, method: "GET" | "POST", body?: unknown): Promise<any> {
+  const token = await getAccessToken();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8000);
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}`, {
-      method: "POST",
+      method,
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify(body),
+      body: body !== undefined ? JSON.stringify(body) : undefined,
       cache: "no-store",
       signal: ctrl.signal,
     });
@@ -47,19 +71,25 @@ async function callAs(path: string, parties: string[], body: unknown): Promise<a
   try {
     json = await res.json();
   } catch {
+    if (res.ok) return {};
     throw new LedgerError(`Non-JSON response from ledger (HTTP ${res.status})`, 502);
   }
-  const apiStatus = typeof json?.status === "number" ? json.status : res.status;
-  if (!res.ok || apiStatus >= 400) {
+  if (!res.ok) {
     const text = JSON.stringify(json);
-    const msg = (json?.errors && json.errors.join("; ")) || json?.error || `Ledger error ${apiStatus}`;
+    const msg = json?.cause || (json?.errors && json.errors.join("; ")) || `Ledger error ${res.status}`;
     let status = 502;
-    if (/not.*active|already.*archived|CONTRACT_NOT_FOUND|locally.*consumed|inactive/i.test(text)) status = 409;
-    else if (/conservation|fee must be|split must be|feeRate|assertion failed|requires authoriz/i.test(text)) status = 422;
-    else if (apiStatus === 401) status = 401;
+    if (/PERMISSION_DENIED|security-sensitive/i.test(text)) status = 403;
+    else if (/CONTRACT_NOT_FOUND|not.*active|already.*archived|inactive/i.test(text)) status = 409;
+    else if (/conservation|fee must be|split must be|feeRate|assertion failed|requires authoriz|ALLOWED_LANGUAGE/i.test(text)) status = 422;
+    else if (res.status === 401) status = 401;
     throw new LedgerError(msg, status);
   }
   return json;
+}
+
+async function ledgerEndOffset(): Promise<number> {
+  const json = await call("/v2/state/ledger-end", "GET");
+  return Number(json.offset ?? 0);
 }
 
 // ---- Domain model -----------------------------------------------------------
@@ -85,19 +115,18 @@ function cleanLineageEntry(raw: string): string {
   return role ? ROLE_LABELS[role] : head;
 }
 
-function toSlice(c: any): Slice {
-  const p = c.payload;
+function toSlice(payload: any, contractId: string): Slice {
   return {
-    contractId: c.contractId,
-    anchor: p.anchor,
-    owner: p.owner,
-    platform: p.platform,
-    instrumentId: p.instrumentId,
-    faceAmount: Number(p.faceAmount),
-    tier: Number(p.tier),
-    maturity: p.maturity,
-    lineage: (p.lineage ?? []).map(cleanLineageEntry),
-    isFee: Boolean(p.isFee),
+    contractId,
+    anchor: payload.anchor,
+    owner: payload.owner,
+    platform: payload.platform,
+    instrumentId: payload.instrumentId,
+    faceAmount: Number(payload.faceAmount),
+    tier: Number(payload.tier),
+    maturity: payload.maturity,
+    lineage: (payload.lineage ?? []).map(cleanLineageEntry),
+    isFee: Boolean(payload.isFee),
   };
 }
 
@@ -105,22 +134,49 @@ export type ProposalContract = { contractId: string; payload: any };
 
 // ---- Reads (projected to the acting party = the privacy demo) ---------------
 
+async function queryActiveContracts(role: Role, filterTemplateId: string): Promise<ProposalContract[]> {
+  const party = partyId(role);
+  const offset = await ledgerEndOffset();
+  const json = await call("/v2/state/active-contracts", "POST", {
+    eventFormat: {
+      filtersByParty: {
+        [party]: {
+          cumulative: [
+            { identifierFilter: { TemplateFilter: { value: { templateId: filterTemplateId, includeCreatedEventBlob: false } } } },
+          ],
+        },
+      },
+      verbose: false,
+    },
+    activeAtOffset: offset,
+  });
+  const rows: any[] = Array.isArray(json) ? json : json.result ?? json.contracts ?? [];
+  return rows
+    .map((r) => r.contractEntry?.JsActiveContract?.createdEvent ?? r.createdEvent)
+    .filter(Boolean)
+    .map((ev: any) => ({ contractId: ev.contractId, payload: ev.createArgument ?? ev.createArguments }));
+}
+
 export async function querySlices(role: Role): Promise<Slice[]> {
-  const json = await callAs("/v1/query", [partyId(role)], { templateIds: [TPL.CreditSlice] });
-  return (json.result ?? []).map(toSlice);
+  const rows = await queryActiveContracts(role, TPL_FILTER.CreditSlice);
+  return rows.map((r) => toSlice(r.payload, r.contractId));
 }
 
 export async function querySplitProposals(role: Role): Promise<ProposalContract[]> {
-  const json = await callAs("/v1/query", [partyId(role)], { templateIds: [TPL.SplitProposal] });
-  return json.result ?? [];
+  return queryActiveContracts(role, TPL_FILTER.SplitProposal);
 }
 
 export async function queryDiscountProposals(role: Role): Promise<ProposalContract[]> {
-  const json = await callAs("/v1/query", [partyId(role)], { templateIds: [TPL.DiscountProposal] });
-  return json.result ?? [];
+  return queryActiveContracts(role, TPL_FILTER.DiscountProposal);
 }
 
 // ---- Writes -----------------------------------------------------------------
+
+function extractContractId(submitResult: any): string | undefined {
+  const events = submitResult?.transaction?.events ?? submitResult?.events ?? [];
+  const created = events.find((e: any) => e.CreatedEvent || e.createdEvent);
+  return (created?.CreatedEvent ?? created?.createdEvent)?.contractId;
+}
 
 export async function exerciseAs(
   role: Role,
@@ -129,7 +185,17 @@ export async function exerciseAs(
   choice: string,
   argument: Record<string, unknown> = {},
 ): Promise<any> {
-  return callAs("/v1/exercise", [partyId(role)], { templateId, contractId, choice, argument });
+  const party = partyId(role);
+  const res = await call("/v2/commands/submit-and-wait-for-transaction", "POST", {
+    commands: {
+      commands: [{ ExerciseCommand: { templateId, contractId, choice, choiceArgument: argument } }],
+      userId: USER_ID,
+      commandId: `dt-${choice}-${contractId.slice(-12)}-${Date.now()}`,
+      actAs: [party],
+      readAs: [party],
+    },
+  });
+  return { result: { contractId: extractContractId(res) }, raw: res };
 }
 
 export async function createAs(
@@ -137,5 +203,15 @@ export async function createAs(
   templateId: string,
   payload: Record<string, unknown>,
 ): Promise<any> {
-  return callAs("/v1/create", parties.map(partyId), { templateId, payload });
+  const partyIds = parties.map(partyId);
+  const res = await call("/v2/commands/submit-and-wait-for-transaction", "POST", {
+    commands: {
+      commands: [{ CreateCommand: { templateId, createArguments: payload } }],
+      userId: USER_ID,
+      commandId: `dt-create-${Date.now()}`,
+      actAs: partyIds,
+      readAs: partyIds,
+    },
+  });
+  return { result: { contractId: extractContractId(res) }, raw: res };
 }

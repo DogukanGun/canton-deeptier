@@ -30,7 +30,7 @@ export async function POST(req: Request) {
       platform: partyId("Platform"),
       instrumentId,
       faceAmount: String(faceAmount),
-      tier: 1,
+      tier: "1",
       maturity,
       lineage: [instrumentId],
       isFee: false,
